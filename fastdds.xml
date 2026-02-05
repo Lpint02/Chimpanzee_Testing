@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<profiles xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+
+  <participant profile_name="ros_participant" is_default_profile="true">
+    <rtps>
+      <useBuiltinTransports>true</useBuiltinTransports>
+
+      <builtin>
+        <initialPeersList>  
+          <locator>
+            <udpv4>
+              <address>239.255.0.1</address>
+              <port>7400</port>
+            </udpv4>
+          </locator>
+        </initialPeersList>
+      </builtin>
+
+    </rtps>
+  </participant>
+
+</profiles>

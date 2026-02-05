@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  # =================================================================
+  # 1. BODY: ROS2 Container (Hardware Driver & Bridge)
+  # =================================================================
+  ros2_img:
+    image: dustynv/ros:foxy-ros-base-l4t-r32.7.1
+    container_name: ros2
+    volumes:
+      - ./src:/workspace/src:rw
+      - ./fastdds.xml:/workspace/fastdds.xml:ro
+      - ./start.sh:/workspace/start.sh:ro
+      - ./config:/workspace/config:ro
+    working_dir: /workspace/src
+    environment:
+      - ROS_DOMAIN_ID=0
+      - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+      - FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/fastdds.xml
+      # Configurazione Bridge
+      - MQTT_HOST=localhost
+      - MQTT_PORT=1883
+    
+    # ENTRYPOINT:
+    # Esegue start.sh a ogni avvio. 
+    # start.sh caricherà le variabili e poi eseguirà il 'command' scritto sotto.
+    entrypoint: ["bash", "/workspace/start.sh"]
+    
+    # COMMAND (DEV MODE):
+    # Mantiene il container vivo. Per produzione: command: ros2 run mqtt_bridge bridge_node
+    command: tail -f /dev/null
+    
+    # NETWORKING:
+    # Il container ROS2 DEVE usare 'host' network per parlare col driver del robot.
+    # Questo significa che condivide l'IP e le porte della Jetson Nano reale.
+    # Per raggiungere Mosquitto: usa 'localhost' (perché Mosquitto espone la porta sull'host).
+    network_mode: host
+    ipc: host
+    pid: host
+    stdin_open: true
+    tty: true
+    depends_on:
+      - mosquitto
+
+  # =================================================================
+  # 2. BRAIN: Python Container (Logic & AI)
+  # =================================================================
+  python310: 
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: py310_img
+    container_name: py310
+    volumes:
+      - ./python_src:/src:rw
+      - ./config/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro 
+    working_dir: /src
+    environment:
+      # Dal container Bridge, non possiamo usare 'localhost' perché 'host' network non è bridge network.
+      # Usiamo 'host.docker.internal' se supportato, oppure l'IP del gateway.
+      # MA: Se mettiamo anche python310 sulla rete Host, tutto è più semplice.
+      # PRO: Comunicazione facile.
+      # CONTRO: Meno isolamento (ma al prof frega poco dell'isolamento di rete vero, vuole solo 2 container).
+      # DECISIONE: Usiamo HOST NETWORK per entrambi per semplicità massima sulla Jetson.
+      - MQTT_HOST=localhost
+    
+    network_mode: host
+    user: "1000:1000"    
+    command: tail -f /dev/null
+    depends_on:
+      - mosquitto
+
+  # =================================================================
+  # 3. NERVOUS SYSTEM: MQTT Broker
+  # =================================================================
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    # Espone la porta sulla rete Host
+    ports:
+      - 1883:1883
+      - 9001:9001
+    network_mode: host
+
+# Networks section removed because everyone is using 'network_mode: host'
+# This is the most robust setup for Jetson Nano hardware access.
