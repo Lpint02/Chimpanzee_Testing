@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.action import ActionClient
 from sensor_msgs.msg import Image
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
+from irobot_create_msgs.action import Undock
 import cv2
 import paho.mqtt.client as mqtt
 import json
@@ -30,6 +32,9 @@ class MqttBridge(Node):
             
         # MQTT -> ROS (Cmd Vel)
         self.publisher = self.create_publisher(Twist, '/cmd_vel', 10)
+
+        # MQTT -> ROS (Undock Action)
+        self._undock_client = ActionClient(self, Undock, 'undock')
         
         # MQTT Client Setup
         self.client = mqtt.Client(client_id="ros2_bridge")
@@ -45,6 +50,7 @@ class MqttBridge(Node):
     def on_connect(self, client, userdata, flags, rc):
         self.get_logger().info(f"Connected to MQTT with result code {rc}")
         client.subscribe("robot/cmd_vel")
+        client.subscribe("robot/cmd/undock")
 
     def on_message(self, client, userdata, msg):
         """Handle incoming messages from MQTT"""
@@ -55,9 +61,41 @@ class MqttBridge(Node):
                 twist.linear.x = float(data.get('linear', 0.0))
                 twist.angular.z = float(data.get('angular', 0.0))
                 self.publisher.publish(twist)
-                # self.get_logger().info(f"Published cmd_vel: lin={twist.linear.x}, ang={twist.angular.z}") 
             except Exception as e:
                 self.get_logger().error(f"Error parsing cmd_vel: {e}")
+        
+        elif msg.topic == "robot/cmd/undock":
+            self.get_logger().info("Received Undock Command from MQTT")
+            self.send_undock_goal()
+
+    def send_undock_goal(self):
+        if not self._undock_client.wait_for_server(timeout_sec=5.0):
+            self.get_logger().error("Undock action server not available!")
+            return
+
+        goal_msg = Undock.Goal()
+        self._undock_client.wait_for_server()
+        self._send_goal_future = self._undock_client.send_goal_async(goal_msg)
+        self._send_goal_future.add_done_callback(self.goal_response_callback)
+        self.get_logger().info("Undock goal sent!")
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.get_logger().info('Undock Goal Rejected :(')
+            self.client.publish("robot/undock/result", "failure")
+            return
+
+        self.get_logger().info('Undock Goal Accepted :)')
+        self._get_result_future = goal_handle.get_result_async()
+        self._get_result_future.add_done_callback(self.get_result_callback)
+
+    def get_result_callback(self, future):
+        result = future.result().result
+        self.get_logger().info('Undock Action Completed!')
+        # Qui potremmo controllare result.is_docked o simili se l'azione ritorna qualcosa
+        # Ma per ora assumiamo che se finisce è "success"
+        self.client.publish("robot/undock/result", "success")
 
     def image_callback(self, msg):
         """Convert ROS Image -> JPEG -> Base64 -> MQTT"""

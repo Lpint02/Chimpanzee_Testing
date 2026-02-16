@@ -67,8 +67,10 @@ class MainBrain:
         # Root sequence
         root = py_trees.composites.Sequence(name="Main Sequence", memory=True)
         
-        # 1. Undock (Skipped/Stubbed for Split Arch Simplicity) 
-        # undock = CheckAndUndock(...) 
+        # 1. Undock Action
+        # Checks if undocked, triggers via MQTT if not, waits for completion.
+        undock = CheckAndUndock() 
+        root.add_child(undock) 
         
         # 2. Main Logic Selector
         # Priorità: Recovery -> Follow -> Search

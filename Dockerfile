@@ -1,5 +1,7 @@
-# Base image for Jetson Nano (ARM64)
 FROM arm64v8/python:3.10-slim
+
+# Evita interruzioni interattive
+ARG DEBIAN_FRONTEND=noninteractive
 
 # 1. Install System Dependencies required for OpenCV and Networking
 # libgl1-mesa-glx, libglib2.0-0: Critical for cv2

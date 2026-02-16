@@ -5,30 +5,32 @@ services:
   # 1. BODY: ROS2 Container (Hardware Driver & Bridge)
   # =================================================================
   ros2_img:
-    image: dustynv/ros:foxy-ros-base-l4t-r32.7.1
+    build:
+      context: .
+      dockerfile: Dockerfile.ros2
+    image: ros2_custom
     container_name: ros2
     volumes:
       - ./src:/workspace/src:rw
+      - ./build:/workspace/build:rw
+      - ./install:/workspace/install:rw
+      - ./log:/workspace/log:rw
       - ./fastdds.xml:/workspace/fastdds.xml:ro
-      - ./start.sh:/workspace/start.sh:ro
       - ./config:/workspace/config:ro
-    working_dir: /workspace/src
+      - ./start_body.sh:/workspace/start_body.sh:ro
+      - /tmp/argus_socket:/tmp/argus_socket
+    working_dir: /workspace
     environment:
       - ROS_DOMAIN_ID=0
       - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
       - FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/fastdds.xml
-      # Configurazione Bridge
       - MQTT_HOST=localhost
       - MQTT_PORT=1883
-    
-    # ENTRYPOINT:
-    # Esegue start.sh a ogni avvio. 
-    # start.sh caricherà le variabili e poi eseguirà il 'command' scritto sotto.
-    entrypoint: ["bash", "/workspace/start.sh"]
-    
-    # COMMAND (DEV MODE):
-    # Mantiene il container vivo. Per produzione: command: ros2 run mqtt_bridge bridge_node
-    command: tail -f /dev/null
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - LD_LIBRARY_PATH=/usr/local/cuda/lib64
+    runtime: nvidia
+    command: bash /workspace/start_body.sh
     
     # NETWORKING:
     # Il container ROS2 DEVE usare 'host' network per parlare col driver del robot.
@@ -39,6 +41,15 @@ services:
     pid: host
     stdin_open: true
     tty: true
+    privileged: true
+    devices:
+      - /dev/video0:/dev/video0
+      - /dev/nvhost-ctrl:/dev/nvhost-ctrl
+      - /dev/nvhost-ctrl-gpu:/dev/nvhost-ctrl-gpu
+      - /dev/nvhost-prof-gpu:/dev/nvhost-prof-gpu
+      - /dev/nvmap:/dev/nvmap
+      - /dev/nvhost-gpu:/dev/nvhost-gpu
+      - /dev/nvhost-as-gpu:/dev/nvhost-as-gpu
     depends_on:
       - mosquitto
 
@@ -66,7 +77,7 @@ services:
     
     network_mode: host
     user: "1000:1000"    
-    command: tail -f /dev/null
+    command: bash start_brain.sh
     depends_on:
       - mosquitto
 

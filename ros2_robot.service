@@ -1,0 +1,31 @@
+[Unit]
+Description=ROS2 Robot Docker Stack (Auto-Start)
+# PRE-CONDIZIONI CRITICHE:
+# 1. Docker deve essere attivo
+Requires=docker.service
+# 2. La rete deve essere online (IP assegnato)
+Wants=network-online.target
+After=docker.service network-online.target
+
+[Service]
+# Riavvia SEMPRE se crasha (tranne se lo fermi tu manualmente)
+Restart=always
+# Aspetta 10 secondi prima di riprovare (evita loop infiniti se c'è un errore grave)
+RestartSec=10
+
+# UTENTE (IMPORTANTE: Metti il tuo user della Jetson, es. 'nvidia' o 'aless')
+User=user 
+Group=docker
+WorkingDirectory=/home/user/ros2_x_robot
+
+# COMANDI
+# 1. Pulizia preventiva: rimuove container orfani o bloccati dal riavvio precedente
+ExecStartPre=/usr/local/bin/docker-compose down --remove-orphans
+# 2. Avvio: Lancia tutto in primo piano (senza -d) così Systemd può monitorare i log
+ExecStart=/usr/local/bin/docker-compose up
+
+# 3. Stop: Quando spegni il servizio, ferma i container elegantemente
+ExecStop=/usr/local/bin/docker-compose down
+
+[Install]
+WantedBy=multi-user.target

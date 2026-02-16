@@ -1,0 +1,37 @@
+# =============================================================================
+# Dockerfile.ros2 - Custom ROS2 Image for Jetson Nano
+# Extends dustynv base and adds MQTT bridge dependencies
+# =============================================================================
+FROM dustynv/ros:foxy-ros-base-l4t-r32.7.1
+
+# Evita prompt interattivi
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Installa dipendenze sistema (opencv precompilato, git per clonare v4l2_camera)
+RUN apt update --allow-insecure-repositories && \
+  apt install -y --allow-unauthenticated python3-opencv git && \
+  rm -rf /var/lib/apt/lists/*
+
+# Installa dipendenze Python (paho-mqtt per bridge)
+RUN pip3 install --no-cache-dir paho-mqtt
+
+# NOTA: Per camera CSI su Jetson, usiamo GStreamer/nvarguscamerasrc
+# invece di v4l2_camera (che non supporta CSI correttamente)
+
+# Configura .bashrc per auto-source
+RUN echo 'source /opt/ros/foxy/install/setup.bash' >> /root/.bashrc && \
+  echo 'source /workspace/install/setup.bash 2>/dev/null' >> /root/.bashrc && \
+  echo 'export ROS_DOMAIN_ID=0' >> /root/.bashrc && \
+  echo 'export RMW_IMPLEMENTATION=rmw_fastrtps_cpp' >> /root/.bashrc && \
+  echo 'export FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/fastdds.xml' >> /root/.bashrc
+
+# Copia script di avvio
+COPY start.sh /ros_entrypoint.sh
+RUN chmod +x /ros_entrypoint.sh
+
+# Working directory
+WORKDIR /workspace
+
+# Entrypoint che carica ROS2 e poi lancia il comando
+ENTRYPOINT ["/ros_entrypoint.sh"]
+CMD ["bash"]

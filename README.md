@@ -1,133 +1,114 @@
-# Guida Deploy: Robot Split Architecture (Jetson Nano)
+# Robot Split Architecture - Jetson Nano
 
-Questa guida spiega passo-passo come avviare il sistema **Brain (Python) & Body (ROS2)** sul Jetson Nano.
+## Architettura
 
-**Prerequisiti**:
-
-- Jetson Nano con Ubuntu 18.04.
-- Repository clonata in `~/ros2_x_robot` (o percorso analogo).
-- Docker e Docker Compose installati.
+```
+┌─────────────────┐     MQTT      ┌─────────────────┐
+│   ROS2 (Body)   │◄────────────►│  Python (Brain) │
+│  mqtt_bridge    │   robot/*    │  detector.py    │
+│                 │              │  main.py        │
+└────────┬────────┘              └─────────────────┘
+         │
+    Hardware (Camera, Motors)
+```
 
 ---
 
-## 1. Pulizia e Costruzione
+## File Importanti
 
-Prima di iniziare, assicuriamoci che le immagini siano aggiornate e pulite.
+| File                 | Scopo                                              |
+| -------------------- | -------------------------------------------------- |
+| `Dockerfile`         | Immagine Python (Brain)                            |
+| `Dockerfile.ros2`    | Immagine ROS2 (Body) - estende dustynv + paho-mqtt |
+| `start.sh`           | Entrypoint ROS2: carica ambiente e lancia comandi  |
+| `docker-compose.yml` | Orchestrazione container                           |
+
+---
+
+## 🔧 SVILUPPO (Manuale)
+
+### 1. Build Immagini
 
 ```bash
 cd ~/ros2_x_robot
-
-# 1. Ferma eventuali container attivi
-docker-compose down
-
-# 2. Ricostruisci le immagini (IMPORTANTE per OpenCV e dipendenze)
-# Nota: Su Jetson Nano la build di OpenCV può impiegare 15-20 minuti la prima volta.
+docker-compose down --remove-orphans
 docker-compose build
 ```
 
----
-
-## 2. Avvio del Sistema (Modalità Sviluppo)
-
-In questa modalità, avviamo i container in background e poi entriamo manualmente nei terminali per lanciare i programmi. È il metodo consigliato per testare e debuggare.
-
-### Passo A: Accendi i Container
+### 2. Avvia Container
 
 ```bash
 docker-compose up -d
+docker ps  # Verifica: ros2, py310, mosquitto
 ```
 
-Attendi qualche secondo. Verifica che siano tutti "Up":
+### 3. Compila ROS2 (Prima volta)
 
 ```bash
-docker ps
-# Dovresti vedere: ros2, py310, mosquitto
+docker exec -it ros2 bash
+
+# Dentro il container:
+cd /workspace
+colcon build --symlink-install
+source install/setup.bash
+
+# Test bridge
+ros2 run mqtt_bridge bridge_node
 ```
 
-### Passo B: Avvia il Body (ROS2 Bridge)
+### 4. Avvia Brain (Terminali separati)
 
-Il container ROS2 usa ora `start.sh` come entrypoint, quindi l'ambiente è già caricato!
+```bash
+# Terminale 1 - Detector
+docker exec -it py310 bash
+python3 detector.py
 
-1. Entra nel container:
-   ```bash
-   docker exec -it ros2 bash
-   ```
-2. Lancia il bridge (ponti ROS <-> MQTT):
-
-   ```bash
-   # Abbiamo creato un alias comodo per te:
-   run_bridge
-
-   # O se preferisci il comando lungo:
-   # ros2 run mqtt_bridge bridge_node
-   ```
-
-   _Output atteso:_ `[INFO]: Connecting to MQTT Broker at localhost:1883... Connected`
-
-### Passo C: Avvia il Brain (Visione)
-
-Questo script processa le immagini dalla telecamera.
-
-1. Apri un **nuovo terminale** (su Jetson o SSH):
-2. Entra nel container Python:
-   ```bash
-   docker exec -it py310 bash
-   ```
-3. Lancia il detector:
-   ```bash
-   python3 detector.py
-   ```
-   _Output atteso:_ `Detector Connected to MQTT...`
-
-### Passo D: Avvia il Brain (Decisioni)
-
-Questo script esegue il Behavior Tree (Logica).
-
-1. Apri un **terzo terminale**:
-2. Entra di nuovo nel container Python:
-   ```bash
-   docker exec -it py310 bash
-   ```
-3. Lancia il cervello principale:
-   ```bash
-   python3 main.py
-   ```
-   _Output atteso:_ `Brain Running...`
+# Terminale 2 - Behavior Tree
+docker exec -it py310 bash
+python3 main.py
+```
 
 ---
 
-## 3. Modalità Produzione (Avvio Automatico)
+## 🚀 PRODUZIONE (Automatico)
 
-Se vuoi che il robot parta automaticamente all'accensione (senza aprire terminali):
+Modifica `docker-compose.yml`:
 
-1. Modifica `ros2_x_robot/docker-compose.yml`.
-2. Cerca la sezione `ros2_img`.
-3. Cambia l'ultima riga `command`:
+```yaml
+# Servizio ros2_img:
+command: ros2 run mqtt_bridge bridge_node
 
-   ```yaml
-   # PRIMA:
-   command: tail -f /dev/null
+# Servizio python310:
+command: python3 main.py
+```
 
-   # DOPO:
-   command: ros2 run mqtt_bridge bridge_node
-   ```
+Poi:
 
-4. Fai lo stesso per `python310` (opzionale, richiederebbe uno script per lanciare entrambi i python).
-5. Riavvia: `docker-compose up -d`. Il robot partirà e inizierà a lavorare da solo.
+```bash
+docker-compose up -d
+# Il robot parte da solo
+```
 
 ---
 
-## 4. Risoluzione Problemi
+## ❌ Errori Comuni
 
-**Il robot non si muove o non vede nulla?**
-Controlla se i messaggi MQTT stanno passando.
+| Errore                  | Causa                    | Soluzione                                 |
+| ----------------------- | ------------------------ | ----------------------------------------- |
+| `ament_cmake not found` | ROS2 non caricato        | `source /opt/ros/foxy/install/setup.bash` |
+| `paho.mqtt not found`   | Immagine vecchia         | `docker-compose build --no-cache`         |
+| `Connection Refused`    | Mosquitto non attivo     | `docker ps`, verifica mosquitto           |
+| `ImportError: libGL`    | Dockerfile Python errato | Rebuild Python image                      |
 
-1. Apri un terminale e ascolta tutto il traffico:
-   ```bash
-   docker exec -it mosquitto mosquitto_sub -t "robot/#" -v
-   ```
-2. Se vedi scorrere dati incomprensibili (Base64), la telecamera funziona.
-3. Se vedi JSON tipo `{"linear": 0.5...}`, il comandi di movimento funzionano.
+---
 
-**Errore "Connection Refused"?**
-Assicurati che `mosquitto` sia il primo container a partire (check `docker ps`).
+## 🔍 Debug
+
+```bash
+# Vedi traffico MQTT
+docker exec -it mosquitto mosquitto_sub -t "robot/#" -v
+
+# Logs container
+docker logs ros2
+docker logs py310
+```
