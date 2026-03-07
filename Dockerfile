@@ -1,4 +1,4 @@
-FROM arm64v8/python:3.10-slim
+FROM arm64v8/python:3.10-slim-bookworm
 
 # Evita interruzioni interattive
 ARG DEBIAN_FRONTEND=noninteractive
@@ -9,7 +9,8 @@ ARG DEBIAN_FRONTEND=noninteractive
 # iputils-ping, net-tools: Essential for network debugging with ROS container
 # mosquitto-clients: Useful for testing MQTT connectivity from shell
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  libgl1-mesa-glx \
+  libgl1 \               
+  libglx-mesa0 \        
   libglib2.0-0 \
   libsm6 \
   libxext6 \

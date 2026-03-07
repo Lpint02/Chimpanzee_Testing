@@ -10,6 +10,8 @@ services:
       dockerfile: Dockerfile.ros2
     image: ros2_custom
     container_name: ros2
+    cpus: '2.0'
+    mem_limit: 1g
     volumes:
       - ./src:/workspace/src:rw
       - ./build:/workspace/build:rw
@@ -62,6 +64,8 @@ services:
       dockerfile: Dockerfile
     image: py310_img
     container_name: py310
+    cpus: '2.0'
+    mem_limit: 1g
     volumes:
       - ./python_src:/src:rw
       - ./config/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro 
@@ -87,12 +91,14 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: mosquitto
+    cpus: '2.0'
+    mem_limit: 1g
     volumes:
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
     # Espone la porta sulla rete Host
-    ports:
-      - 1883:1883
-      - 9001:9001
+    #ports:
+     # - 1883:1883
+     # - 9001:9001
     network_mode: host
 
 # Networks section removed because everyone is using 'network_mode: host'

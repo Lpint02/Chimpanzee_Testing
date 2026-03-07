@@ -21,7 +21,7 @@ def main():
     # GStreamer pipeline per CSI camera Jetson
     gst_pipeline = (
         "nvarguscamerasrc ! "
-        "video/x-raw(memory:NVMM),width=640,height=480,framerate=30/1 ! "
+        "video/x-raw(memory:NVMM),width=640,height=480,framerate=10/1 ! "
         "nvvidconv ! "
         "video/x-raw,format=BGRx ! "
         "videoconvert ! "
@@ -43,7 +43,7 @@ def main():
         ret, frame = cap.read()
         if ret:
             # Comprimi in JPEG e invia via MQTT
-            _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 50])
+            _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 30])
             client.publish("robot/camera", base64.b64encode(buffer))
             frame_count += 1
             if frame_count % 30 == 0:
@@ -51,7 +51,7 @@ def main():
         else:
             print("Failed to grab frame")
         
-        time.sleep(0.033)  # ~30 fps
+        time.sleep(0.1)  # ~10 fps
 
 if __name__ == '__main__':
     main()

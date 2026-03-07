@@ -111,7 +111,7 @@ class BallDetector:
                  _, buffer = cv2.imencode('.jpg', small_debug, [int(cv2.IMWRITE_JPEG_QUALITY), 30])
                  debug_b64 = base64.b64encode(buffer)
                  self.client.publish("robot/camera/debug", debug_b64)
-            
+            time.sleep(0.05)
         except Exception as e:
             print(f"Vision Error: {e}")
 
