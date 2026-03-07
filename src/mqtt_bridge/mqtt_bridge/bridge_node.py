@@ -136,7 +136,7 @@ class MqttBridge(Node):
             goal_handle = future.result()
             if not goal_handle.accepted:
                 self.get_logger().info('Dock Goal Rejected :(')
-                self.client.publish("robot/undock/result", "failure")
+                self.client.publish("robot/dock/result", "failure")
                 return
 
             self.get_logger().info('Dock Goal Accepted :)')
@@ -146,7 +146,7 @@ class MqttBridge(Node):
             )
         except Exception as e:
             self.get_logger().error(f"Dock goal response error: {e}")
-            self.client.publish("robot/undock/result", "failure")
+            self.client.publish("robot/dock/result", "failure")
 
     def dock_result_callback(self, future):
         """Callback per il risultato dell'azione Dock."""
@@ -154,13 +154,13 @@ class MqttBridge(Node):
             result = future.result().result
             if result.is_docked:
                 self.get_logger().info('Dock Action Completed! Robot is docked.')
-                self.client.publish("robot/undock/result", "success")
+                self.client.publish("robot/dock/result", "success")
             else:
                 self.get_logger().info('Dock Action Completed but NOT docked.')
-                self.client.publish("robot/undock/result", "failure")
+                self.client.publish("robot/dock/result", "failure")
         except Exception as e:
             self.get_logger().error(f"Dock result error: {e}")
-            self.client.publish("robot/undock/result", "failure")
+            self.client.publish("robot/dock/result", "failure")
 
     # ======== BATTERY ========
 
@@ -168,7 +168,7 @@ class MqttBridge(Node):
         """Converte BatteryState ROS2 in payload MQTT JSON."""
         try:
             payload = json.dumps({
-                "level": msg.percentage,
+                "level": msg.percentage * 100.0,
                 "voltage": msg.voltage
             })
             self.client.publish("robot/battery/status", payload)

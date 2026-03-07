@@ -236,7 +236,7 @@ class ReturnToBase(py_trees.behaviour.Behaviour):
 
         try:
             self.dock_client.connect(self.mqtt_host, self.mqtt_port, 60)
-            self.dock_client.subscribe("robot/undock/result")
+            self.dock_client.subscribe("robot/dock/result")
             self.dock_client.on_message = self._on_dock_message
             self.dock_client.loop_start()
         except Exception as e:
@@ -245,7 +245,7 @@ class ReturnToBase(py_trees.behaviour.Behaviour):
     def _on_dock_message(self, client, userdata, msg):
         """Callback per il risultato del docking."""
         try:
-            if msg.topic == "robot/undock/result":
+            if msg.topic == "robot/dock/result":
                 payload = msg.payload.decode()
                 print(f"[ReturnToBase] Dock Result: {payload}")
                 if payload == "success":

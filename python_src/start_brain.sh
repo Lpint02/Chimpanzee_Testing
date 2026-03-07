@@ -5,7 +5,7 @@ echo "🧠 Starting Brain Container..."
 
 # 1. Start Detector (Background)
 echo "👁️ Starting Detector..."
-python3 detector.py &
+python3 detector_kalman.py &
 
 # Wait for detector to initialize
 sleep 2
