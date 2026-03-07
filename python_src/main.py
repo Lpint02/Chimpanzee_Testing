@@ -32,9 +32,8 @@ import paho.mqtt.client as mqtt
 import json
 
 from behaviors.toblackboard import ToBlackboard
-from behaviors.undock_action import CheckAndUndock
 from behaviors.actions import (
-    FollowBall, SearchBall, BackUpAndRotate,
+    CheckAndUndock, FollowBall, SearchBall, BackUpAndRotate,
     TrackGhost, ReturnToBase
 )
 from behaviors.conditions import (
@@ -187,6 +186,9 @@ class MainBrain:
             while True:
                 # 1. Tick Tree
                 self.tree.tick()
+                
+                # debug: stampa albero con status
+                print(py_trees.display.ascii_tree(self.root, show_status=True))
 
                 # 2. Read Output from Blackboard ('cmd_vel')
                 try:
