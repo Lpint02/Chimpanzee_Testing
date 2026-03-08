@@ -22,6 +22,11 @@ if [ -f "/workspace/install/setup.bash" ]; then
     source "/workspace/install/setup.bash"
 fi
 
+# 3. Source irobot_create_msgs
+if [ -f "/workspace/src/create_ws/install/setup.bash" ]; then
+    source "/workspace/src/create_ws/install/setup.bash"
+fi
+
 # 3. Export Critical Variables (Just in case they weren't set)
 export ROS_DOMAIN_ID=0
 export FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/fastdds.xml

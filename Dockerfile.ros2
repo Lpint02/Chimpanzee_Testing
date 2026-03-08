@@ -12,6 +12,10 @@ RUN apt update --allow-insecure-repositories && \
   apt install -y --allow-unauthenticated python3-opencv git && \
   rm -rf /var/lib/apt/lists/*
 
+RUN apt update --allow-insecure-repositories && \
+  apt install -y --allow-unauthenticated ros-foxy-irobot-create-msgs && \
+  rm -rf /var/lib/apt/lists/*
+  
 # Installa dipendenze Python (paho-mqtt per bridge)
 RUN pip3 install --no-cache-dir paho-mqtt
 
