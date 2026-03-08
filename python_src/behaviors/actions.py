@@ -37,8 +37,8 @@ class BackUpAndRotate(py_trees.behaviour.Behaviour):
         )
 
         self.start_time = None
-        self.backup_duration = 1.0
-        self.rotate_duration = 1.5
+        self.backup_duration = 1.5  # FIX aumentato (era 1.0)
+        self.rotate_duration = 2.0  # FIX aumentato (era 1.5)
         self.random_turn_speed = 0.0
 
     def initialise(self):
@@ -55,9 +55,10 @@ class BackUpAndRotate(py_trees.behaviour.Behaviour):
         angular_z = 0.0
 
         if elapsed < self.backup_duration:
-            linear_x = -0.15
+            linear_x = -0.15  # FIX Fase 1: solo indietro
+            angular_z = 0.0  # FIX nessuna rotazione in fase 1
         elif elapsed < (self.backup_duration + self.rotate_duration):
-            linear_x = -0.15
+            linear_x = 0.0  # FIX Fase 2: solo rotazione (era -0.15)
             angular_z = self.random_turn_speed
         else:
             self.blackboard.set('is_recovering', False)
@@ -70,6 +71,7 @@ class BackUpAndRotate(py_trees.behaviour.Behaviour):
 
     def terminate(self, new_status):
         self.blackboard.set('cmd_vel', {'linear': 0.0, 'angular': 0.0})
+        self.blackboard.set('is_recovering', False)  # FIX sempre resettare is_recovering
 
 
 class FollowBall(py_trees.behaviour.Behaviour):

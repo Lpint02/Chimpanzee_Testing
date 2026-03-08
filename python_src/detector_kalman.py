@@ -128,8 +128,10 @@ class BallDetectorKalman:
         # Kalman Filter
         self.kf = KalmanFilter2D()
         self.last_detection_time = 0.0
-        self.ghost_timeout = 4.0  # secondi prima di dichiarare "lost"
+        self.ghost_timeout = 1.0  # FIX secondi prima di dichiarare "lost" (era 4.0)
         self.kf_initialized = False
+        self.lost_frame_count = 0  # FIX contatore frame consecutivi senza detection
+        self.last_real_area = 0.0  # FIX ultima area valida rilevata
 
         # Frame counter per debug stream
         self.frame_count = 0
@@ -222,15 +224,22 @@ class BallDetectorKalman:
                     self.kf.update(raw_cx, raw_cy)
 
                 self.last_detection_time = now
+                self.lost_frame_count = 0  # FIX reset contatore
+                self.last_real_area = area  # FIX salva ultima area valida
                 mode = "real"
             else:
                 # Nessuna detection OpenCV
+                self.lost_frame_count += 1  # FIX incrementa contatore
                 if (self.kf_initialized
                         and (now - self.last_detection_time) < self.ghost_timeout):
                     self.kf.predict()
-                    mode = "ghost"
+                    if self.lost_frame_count < 5:  # FIX hysteresis: ghost solo dopo 5 frame
+                        mode = "real"  # FIX mantieni real durante grace period
+                    else:
+                        mode = "ghost"
                 else:
                     mode = "lost"
+                    self.kf_initialized = False  # FIX reset Kalman quando lost
 
             # Estrai stato Kalman
             state = self.kf.get_state()
@@ -239,7 +248,10 @@ class BallDetectorKalman:
             est_cy = int(state[1]) if self.kf_initialized else -1
 
             # Area: -1.0 se ghost/lost
-            publish_area = float(area) if mode == "real" else -1.0
+            if mode == "real":  # FIX usa last_real_area durante grace period
+                publish_area = float(area) if detected else float(self.last_real_area)
+            else:
+                publish_area = -1.0
 
             # ======== PUBBLICA RISULTATO ========
             result_payload = json.dumps({
