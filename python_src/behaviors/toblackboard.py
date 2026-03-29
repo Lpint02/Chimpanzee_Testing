@@ -10,6 +10,7 @@ Topic MQTT sottoscritti:
 - "robot/vision/ball"     → ball_data (dict completo)
 - "robot/battery/status"  → battery_level (float)
 - "robot/bumper"          → is_bumped (bool)
+- "robot/vision/ball/cx"  → last_ball_cx (float)
 """
 import py_trees
 import json
@@ -49,6 +50,9 @@ class ToBlackboard(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(
             key='is_bumped', access=py_trees.common.Access.WRITE
         )
+        self.blackboard.register_key(
+            key='last_ball_cx', access=py_trees.common.Access.WRITE
+        )
 
     def setup(self, **kwargs):
         """Sottoscrivi ai topic MQTT rilevanti."""
@@ -64,10 +68,13 @@ class ToBlackboard(py_trees.behaviour.Behaviour):
             if msg.topic == "robot/vision/ball":
                 data = json.loads(msg.payload.decode())
                 self.blackboard.set('ball_data', data)
+                cx = data.get('cx', -1)
+                self.blackboard.set('last_ball_cx', cx)
 
             elif msg.topic == "robot/battery/status":
                 data = json.loads(msg.payload.decode())
-                level = float(data.get('level', 100.0))
+                percentage = data.get('percentage', data.get('level', 1.0))
+                level = float(percentage) * 100.0  # convert to 0-100
                 self.blackboard.set('battery_level', level)
 
             elif msg.topic == "robot/bumper":

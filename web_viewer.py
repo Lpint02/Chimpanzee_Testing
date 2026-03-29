@@ -468,6 +468,11 @@ def on_message(client, userdata, msg):
         elif topic == "robot/cmd_vel":
             state["cmd_vel"] = json.loads(msg.payload)
         elif topic == "robot/battery/status":
+            raw = json.loads(msg.payload)
+            # Normalize: ROS2 bridge publishes 'percentage' (0.0-1.0),
+            # but the dashboard expects 'level' (0-100).
+            percentage = raw.get('percentage', raw.get('level', 0))
+            state["battery"] = {"level": round(percentage * 100, 1)}
             state["battery"] = json.loads(msg.payload)
         elif topic == "robot/bumper":
             state["bumper"] = json.loads(msg.payload)

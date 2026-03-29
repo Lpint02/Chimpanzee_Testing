@@ -78,6 +78,9 @@ class MainBrain:
         self.blackboard.register_key(
             key='cmd_vel', access=py_trees.common.Access.READ
         )
+        self.blackboard.register_key(
+            key='last_ball_cx', access=py_trees.common.Access.WRITE
+        )
 
         # Inizializza valori di default
         self.blackboard.set('ball_data', {
@@ -88,6 +91,7 @@ class MainBrain:
         self.blackboard.set('is_undocked', False)
         self.blackboard.set('is_recovering', False)
         self.blackboard.set('is_bumped', False)
+        self.blackboard.set('last_ball_cx', -1.0)
 
         # Connect MQTT
         print("Brain connecting to MQTT...")

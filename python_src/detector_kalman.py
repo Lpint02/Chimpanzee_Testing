@@ -37,14 +37,6 @@ class KalmanFilter2D:
         # Stato iniziale [cx, cy, vx, vy]
         self.x = np.zeros((4, 1), dtype=np.float64)
 
-        # Matrice di transizione (Constant Velocity, dt=1)
-        self.F = np.array([
-            [1, 0, 1, 0],
-            [0, 1, 0, 1],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ], dtype=np.float64)
-
         # Matrice di osservazione (misuriamo solo cx, cy)
         self.H = np.array([
             [1, 0, 0, 0],
@@ -58,9 +50,9 @@ class KalmanFilter2D:
         self.Q = np.array([
             [1, 0, 0, 0],
             [0, 1, 0, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, 1]
-        ], dtype=np.float64) * 0.5
+            [0, 0, 10, 0],
+            [0, 0, 0, 10]
+        ], dtype=np.float64)
 
         # Rumore di misura
         self.R = np.array([
@@ -68,10 +60,20 @@ class KalmanFilter2D:
             [0, 5]
         ], dtype=np.float64)
 
-    def predict(self):
+    def _make_F(self, dt: float):
+        """Costruisce la matrice di transizione di stato F per un dato dt."""
+        return np.array([
+            [1, 0, dt, 0],
+            [0, 1, 0, dt],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ], dtype=np.float64)
+
+    def predict(self, dt: float = 1.0):
         """Predizione dello stato al passo successivo."""
-        self.x = self.F @ self.x
-        self.P = self.F @ self.P @ self.F.T + self.Q
+        F = self._make_F(dt)
+        self.x = F @ self.x
+        self.P = F @ self.P @ F.T + self.Q
         return self.x.copy()
 
     def update(self, cx, cy):
@@ -128,10 +130,28 @@ class BallDetectorKalman:
         # Kalman Filter
         self.kf = KalmanFilter2D()
         self.last_detection_time = 0.0
-        self.ghost_timeout = 1.0  # FIX secondi prima di dichiarare "lost" (era 4.0)
+        self.ghost_timeout = 3.0  # FIX secondi prima di dichiarare "lost" (era 4.0)
         self.kf_initialized = False
+        self.ghost_hysteresis_frames = 10
         self.lost_frame_count = 0  # FIX contatore frame consecutivi senza detection
         self.last_real_area = 0.0  # FIX ultima area valida rilevata
+
+        # FIX 2: rate-limiter — sostituisce time.sleep() nel callback.
+        # Tracciamo l'ultimo timestamp di elaborazione; i frame che arrivano
+        # troppo presto vengono scartati senza bloccare il thread MQTT.
+        self.min_frame_interval = 0.05   # 20 fps max
+        self.last_process_time  = 0.0
+
+        # FIX 3: dt reale — tracciamo il tempo dell'ultimo frame
+        # elaborato per passarlo a kf.predict() invece di usare dt=1.
+        self.last_frame_time = 0.0
+
+        # FIX 5: stima velocità iniziale tramite differenze finite.
+        # Salviamo la posizione del frame precedente per calcolare vx/vy
+        # al secondo frame di detection, invece di partire da vx=vy=0.
+        self.prev_cx: float | None = None
+        self.prev_cy: float | None = None
+        self.prev_time: float | None = None
 
         # Frame counter per debug stream
         self.frame_count = 0
@@ -158,117 +178,155 @@ class BallDetectorKalman:
 
     def process_image(self, payload):
         """Elabora frame camera: HSV detection + Kalman tracking."""
+        #  FIX 2: rate-limiter — scarta i frame troppo ravvicinati senza
+        # bloccare il thread MQTT con time.sleep(). Questo evita che i frame
+        # si accodino nel buffer MQTT e che last_detection_time drifti.
+        now = time.time()
+        if now - self.last_process_time < self.min_frame_interval:
+            return
+        self.last_process_time = now
+ 
         try:
             # Decode Base64 -> Bytes -> Numpy -> Image
             img_data = base64.b64decode(payload)
             np_arr = np.frombuffer(img_data, np.uint8)
             frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-
+ 
             if frame is None:
                 print("Frame decode FAILED")
                 return
-
+ 
+            # BUG FIX 3: dt reale tra frame elaborati consecutivi
+            dt = now - self.last_frame_time if self.last_frame_time > 0 else 0.05
+            dt = max(0.01, min(dt, 0.5))  # clamp: [10ms, 500ms]
+            self.last_frame_time = now
+ 
             # ======== PIPELINE HSV IDENTICO ========
-            # Gaussian Blur per ridurre il rumore
             blurred = cv2.GaussianBlur(frame, (11, 11), 0)
-
             hsv = cv2.cvtColor(blurred, cv2.COLOR_BGR2HSV)
-
-            # Thresholding combinato (Range 1 + Range 2)
+ 
             mask1 = cv2.inRange(hsv, self.lower_red1, self.upper_red1)
             mask2 = cv2.inRange(hsv, self.lower_red2, self.upper_red2)
             mask = cv2.bitwise_or(mask1, mask2)
-
-            # Morfologia
+ 
             kernel = np.ones((5, 5), np.uint8)
             mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
             mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-
-            # Contorni
+ 
             contours, _ = cv2.findContours(
                 mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
             )
             # ======== FINE PIPELINE HSV ========
-
-            # Variabili di rilevamento OpenCV
+ 
             detected = False
             raw_cx = -1
             raw_cy = -1
             area = 0.0
             largest_contour = None
-
+ 
             if contours:
                 largest_contour = max(contours, key=cv2.contourArea)
                 area = cv2.contourArea(largest_contour)
-
                 if area > self.min_area:
                     M = cv2.moments(largest_contour)
                     if M['m00'] > 0:
                         raw_cx = int(M['m10'] / M['m00'])
                         raw_cy = int(M['m01'] / M['m00'])
                         detected = True
-
+ 
             # ======== KALMAN FILTER ========
-            now = time.time()
-
             if detected:
-                # Aggiorna Kalman con misura reale
                 if not self.kf_initialized:
+                    #  FIX 5a: primo frame — inizializza posizione.
+                    # La velocità viene stimata al secondo frame tramite
+                    # differenze finite invece di rimanere 0 per sempre.
                     self.kf.x = np.array(
-                        [[raw_cx], [raw_cy], [0], [0]], dtype=np.float64
+                        [[raw_cx], [raw_cy], [0.0], [0.0]], dtype=np.float64
                     )
                     self.kf.P = np.eye(4, dtype=np.float64) * 100.0
                     self.kf_initialized = True
+                    # Salva per stima velocità al prossimo frame
+                    self.prev_cx   = float(raw_cx)
+                    self.prev_cy   = float(raw_cy)
+                    self.prev_time = now
                 else:
-                    self.kf.predict()
+                    #  FIX 5b: secondo frame — inietta velocità calcolata
+                    # tramite differenze finite prima di eseguire il ciclo
+                    # predict/update. Questo dà al Kalman una stima realistica
+                    # della velocità fin dall'inizio, invece di attendere che
+                    # converga lentamente da vx=vy=0.
+                    if (self.prev_cx is not None
+                            and self.prev_time is not None
+                            and (now - self.prev_time) > 0):
+                        elapsed = now - self.prev_time
+                        init_vx = (raw_cx - self.prev_cx) / elapsed
+                        init_vy = (raw_cy - self.prev_cy) / elapsed
+                        # Inietta solo se la velocità precedente era ancora 0
+                        # (evita di sovrascrivere una stima già convergente)
+                        if abs(float(self.kf.x[2, 0])) < 1.0 and \
+                           abs(float(self.kf.x[3, 0])) < 1.0:
+                            self.kf.x[2, 0] = init_vx
+                            self.kf.x[3, 0] = init_vy
+                    # Azzera il buffer delle differenze finite
+                    self.prev_cx = self.prev_cy = self.prev_time = None
+ 
+                    # Ciclo standard predict → update con dt reale ( FIX 3)
+                    self.kf.predict(dt)
                     self.kf.update(raw_cx, raw_cy)
-
+ 
                 self.last_detection_time = now
-                self.lost_frame_count = 0  # FIX reset contatore
-                self.last_real_area = area  # FIX salva ultima area valida
+                self.lost_frame_count = 0
+                self.last_real_area = area
                 mode = "real"
+ 
             else:
                 # Nessuna detection OpenCV
-                self.lost_frame_count += 1  # FIX incrementa contatore
+                self.lost_frame_count += 1
+                self.prev_cx = self.prev_cy = self.prev_time = None  # reset FD buffer
+ 
                 if (self.kf_initialized
                         and (now - self.last_detection_time) < self.ghost_timeout):
-                    self.kf.predict()
-                    if self.lost_frame_count < 5:  # FIX hysteresis: ghost solo dopo 5 frame
-                        mode = "real"  # FIX mantieni real durante grace period
+                    # Predict con dt reale anche in modalità ghost (BUG FIX 3)
+                    self.kf.predict(dt)
+ 
+                    # BUG FIX 4: soglia hysteresis aumentata — ghost mode
+                    # si attiva solo dopo ghost_hysteresis_frames frame
+                    # consecutivi senza detection, non dopo soli 5.
+                    if self.lost_frame_count <= self.ghost_hysteresis_frames:
+                        mode = "real"   # grace period: falso negativo transitorio
                     else:
                         mode = "ghost"
                 else:
                     mode = "lost"
-                    self.kf_initialized = False  # FIX reset Kalman quando lost
-
+                    self.kf_initialized = False
+                    self.prev_cx = self.prev_cy = self.prev_time = None
+ 
             # Estrai stato Kalman
             state = self.kf.get_state()
             vx, vy = self.kf.get_velocity()
             est_cx = int(state[0]) if self.kf_initialized else -1
             est_cy = int(state[1]) if self.kf_initialized else -1
-
-            # Area: -1.0 se ghost/lost
-            if mode == "real":  # FIX usa last_real_area durante grace period
+ 
+            if mode == "real":
                 publish_area = float(area) if detected else float(self.last_real_area)
             else:
                 publish_area = -1.0
-
+ 
             # ======== PUBBLICA RISULTATO ========
             result_payload = json.dumps({
-                "cx": est_cx,
-                "cy": est_cy,
+                "cx":   est_cx,
+                "cy":   est_cy,
                 "area": publish_area,
-                "vx": round(vx, 4),
-                "vy": round(vy, 4),
+                "vx":   round(vx, 4),
+                "vy":   round(vy, 4),
                 "mode": mode
             })
             self.client.publish("robot/vision/ball", result_payload)
-
+ 
             # ======== DEBUG VISUALIZATION ========
             debug_frame = frame.copy()
-
+ 
             if mode == "real" and largest_contour is not None:
-                # Bounding rect verde + centro blu + testo area
                 x, y, w, h = cv2.boundingRect(largest_contour)
                 cv2.rectangle(debug_frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 cv2.circle(debug_frame, (est_cx, est_cy), 5, (255, 0, 0), -1)
@@ -276,24 +334,22 @@ class BallDetectorKalman:
                     debug_frame, f"A:{int(area)} X:{est_cx}",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2
                 )
-
             elif mode == "ghost":
-                # Cerchio giallo tratteggiato sulla posizione predetta
                 self._draw_dashed_circle(
                     debug_frame, (est_cx, est_cy), 30, (0, 255, 255), 2
                 )
+                elapsed_ghost = now - self.last_detection_time
                 cv2.putText(
-                    debug_frame, f"GHOST X:{est_cx}",
+                    debug_frame,
+                    f"GHOST X:{est_cx} ({elapsed_ghost:.1f}s/{self.ghost_timeout:.0f}s)",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2
                 )
-
             elif mode == "lost":
-                # Testo rosso "TARGET LOST"
                 cv2.putText(
                     debug_frame, "TARGET LOST",
                     (50, 120), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3
                 )
-
+ 
             # Invia debug stream (1 frame ogni 3, ridimensionato, compresso)
             self.frame_count += 1
             if self.frame_count % 3 == 0:
@@ -303,12 +359,10 @@ class BallDetectorKalman:
                 )
                 debug_b64 = base64.b64encode(buffer)
                 self.client.publish("robot/camera/debug", debug_b64)
-
-            time.sleep(0.05)
-
+ 
         except Exception as e:
             print(f"Vision Kalman Error: {e}")
-
+ 
     def _draw_dashed_circle(self, img, center, radius, color, thickness,
                             dash_length=10):
         """Disegna un cerchio tratteggiato su img."""

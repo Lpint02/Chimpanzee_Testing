@@ -20,9 +20,24 @@ import os
 
 class BackUpAndRotate(py_trees.behaviour.Behaviour):
     """
-    Azione di recovery: indietreggia e ruota in direzione casuale.
-    Scrive is_recovering e cmd_vel sulla blackboard.
+        Azione di recovery: indietreggia poi ruota verso la palla (~90 gradi).
+ 
+        Fase 1 - Backup  (backup_duration secondi):  linear = -0.15, angular = 0
+        Fase 2 - Rotazione (rotate_duration secondi): linear = 0,    angular = ±TURN_SPEED
+    
+        La direzione di rotazione viene scelta in initialise() leggendo last_ball_cx:
+        - palla a destra del centro → angular negativo (gira a destra)
+        - palla a sinistra          → angular positivo (gira a sinistra)
+        - mai vista                 → alterna ad ogni attivazione
+    
+        FIX: is_bumped viene azzerato in initialise() per evitare il loop
+        infinito (senza questo reset la condizione IsRecoveringOrBumperDetected
+        continua a tornare SUCCESS anche dopo che il recovery e' completato).
     """
+    IMAGE_CENTER  = 320    # meta' frame 640 px
+    TURN_SPEED    = 1.0    # rad/s velocita' di rotazione
+    # 90 deg = pi/2 rad; a 1.0 rad/s => ~1.57 s
+    ROTATE_DURATION = 1.57
 
     def __init__(self, name="BackUpAndRotate"):
         super().__init__(name)
@@ -33,45 +48,68 @@ class BackUpAndRotate(py_trees.behaviour.Behaviour):
             key='is_recovering', access=py_trees.common.Access.WRITE
         )
         self.blackboard.register_key(
+            key='is_bumped', access=py_trees.common.Access.WRITE
+        )
+        self.blackboard.register_key(
+            key='last_ball_cx', access=py_trees.common.Access.READ
+        )
+        self.blackboard.register_key(
             key='cmd_vel', access=py_trees.common.Access.WRITE
         )
 
         self.start_time = None
         self.backup_duration = 1.5  # FIX aumentato (era 1.0)
-        self.rotate_duration = 2.0  # FIX aumentato (era 1.5)
+        self.rotate_duration = self.ROTATE_DURATION
         self.random_turn_speed = 0.0
+        self.default_direction = 1.0
 
     def initialise(self):
         self.start_time = time.time()
         self.blackboard.set('is_recovering', True)
-        direction = 1 if random.random() > 0.5 else -1
-        self.random_turn_speed = direction * 1.0
-        print("STARTING RECOVERY: BackUp")
+        self.blackboard.set('is_bumped', False)  # FIX reset is_bumped per evitare loop infinito
+        
+        try:
+            last_cx = self.blackboard.get('last_ball_cx')
+        except KeyError:
+            last_cx = -1
+
+        if last_cx < 0:
+            self._default_direction *= -1
+            self.turn_speed = self._default_direction * self.TURN_SPEED
+            label = 'LEFT' if self.turn_speed > 0 else 'RIGHT'
+            print(f"[BackUpAndRotate] No ball history — alternating: {label}")
+        elif last_cx >= self.IMAGE_CENTER:
+            self.turn_speed = -self.TURN_SPEED   # destra
+            print(f"[BackUpAndRotate] Ball was RIGHT (cx={last_cx}) — turning RIGHT")
+        else:
+            self.turn_speed = self.TURN_SPEED    # sinistra
+            print(f"[BackUpAndRotate] Ball was LEFT (cx={last_cx}) — turning LEFT")
+
+        print("[BackUpAndRotate] STARTING RECOVERY: BackUp")
 
     def update(self):
         elapsed = time.time() - self.start_time
 
-        linear_x = 0.0
-        angular_z = 0.0
-
         if elapsed < self.backup_duration:
-            linear_x = -0.15  # FIX Fase 1: solo indietro
-            angular_z = 0.0  # FIX nessuna rotazione in fase 1
+            # Fase 1: solo indietro
+            cmd = {'linear': -0.15, 'angular': 0.0}
         elif elapsed < (self.backup_duration + self.rotate_duration):
-            linear_x = 0.0  # FIX Fase 2: solo rotazione (era -0.15)
-            angular_z = self.random_turn_speed
+            # Fase 2: rotazione ~90 gradi verso la palla
+            cmd = {'linear': 0.0, 'angular': self.turn_speed}
         else:
             self.blackboard.set('is_recovering', False)
-            print("RECOVERY COMPLETED")
+            print("[BackUpAndRotate] RECOVERY COMPLETED")
             return py_trees.common.Status.SUCCESS
-
-        # Scrivi comando sulla blackboard per il main loop
-        self.blackboard.set('cmd_vel', {'linear': linear_x, 'angular': angular_z})
+ 
+        self.blackboard.set('cmd_vel', cmd)
         return py_trees.common.Status.RUNNING
-
+ 
     def terminate(self, new_status):
         self.blackboard.set('cmd_vel', {'linear': 0.0, 'angular': 0.0})
-        self.blackboard.set('is_recovering', False)  # FIX sempre resettare is_recovering
+        self.blackboard.set('is_recovering', False)
+        # Garanzia extra: is_bumped azzerato anche se terminate() viene chiamato
+        # prima che initialise() abbia potuto farlo (es. interruzione esterna).
+        self.blackboard.set('is_bumped', False)
 
 
 class FollowBall(py_trees.behaviour.Behaviour):
@@ -130,7 +168,16 @@ class SearchBall(py_trees.behaviour.Behaviour):
     """
     Rotazione in cerca della palla.
     Scrive cmd_vel sulla blackboard con velocità angolare costante.
+        Determina la direzione di rotazione in base all'ultima posizione
+    orizzontale conosciuta della palla (last_ball_cx):
+    - Palla persa a destra   (last_ball_cx >= IMAGE_CENTER): gira a destra
+    - Palla persa a sinistra (last_ball_cx <  IMAGE_CENTER): gira a sinistra
+    - Mai vista              (last_ball_cx == -1):           alterna ogni attivazione
+ 
+    IMAGE_CENTER e' la meta' orizzontale del frame (default 320 px).
     """
+    IMAGE_CENTER = 320.0
+    SEARCH_SPEED = 0.5
 
     def __init__(self, name="SearchBall"):
         super().__init__(name)
@@ -140,11 +187,40 @@ class SearchBall(py_trees.behaviour.Behaviour):
         self.blackboard.register_key(
             key='cmd_vel', access=py_trees.common.Access.WRITE
         )
+        self.blackboard.register_key(
+            key='last_ball_cx', access=py_trees.common.Access.READ
+        )
+        self.default_direction = 1.0
+        self.spin_direction = 1.0
+
+    def initialise(self):
+        """Calcola la direzione di spin ogni volta che il nodo viene attivato."""
+        try:
+            last_cx = self.blackboard.get('last_ball_cx')
+        except KeyError:
+            last_cx = -1
+ 
+        if last_cx < 0:
+            # Palla mai vista: alterna la direzione ad ogni attivazione
+            self._default_direction *= -1
+            self._spin_direction = self._default_direction
+            label = 'LEFT' if self._spin_direction > 0 else 'RIGHT'
+            print(f"[SearchBall] No history — alternating spin: {label}")
+        elif last_cx >= self.IMAGE_CENTER:
+            # Palla persa a destra del centro -> gira a destra (angular_z negativo)
+            self._spin_direction = -1.0
+            print(f"[SearchBall] Ball was RIGHT (cx={last_cx}) — spinning RIGHT")
+        else:
+            # Palla persa a sinistra del centro -> gira a sinistra (angular_z positivo)
+            self._spin_direction = 1.0
+            print(f"[SearchBall] Ball was LEFT (cx={last_cx}) — spinning LEFT")
 
     def update(self):
         # Ruota in cerca della palla
-        self.blackboard.set('cmd_vel', {'linear': 0.0, 'angular': 0.5})
+        angular_z = self._spin_direction * self.SEARCH_SPEED
+        self.blackboard.set('cmd_vel', {'linear': 0.0, 'angular': angular_z})
         return py_trees.common.Status.RUNNING
+ 
 
     def terminate(self, new_status):
         self.blackboard.set('cmd_vel', {'linear': 0.0, 'angular': 0.0})
