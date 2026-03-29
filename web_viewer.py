@@ -473,7 +473,6 @@ def on_message(client, userdata, msg):
             # but the dashboard expects 'level' (0-100).
             percentage = raw.get('percentage', raw.get('level', 0))
             state["battery"] = {"level": round(percentage * 100, 1)}
-            state["battery"] = json.loads(msg.payload)
         elif topic == "robot/bumper":
             state["bumper"] = json.loads(msg.payload)
 
