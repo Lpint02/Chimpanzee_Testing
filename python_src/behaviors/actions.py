@@ -74,8 +74,8 @@ class BackUpAndRotate(py_trees.behaviour.Behaviour):
             last_cx = -1
 
         if last_cx < 0:
-            self._default_direction *= -1
-            self.turn_speed = self._default_direction * self.TURN_SPEED
+            self.default_direction *= -1
+            self.turn_speed = self.default_direction * self.TURN_SPEED
             label = 'LEFT' if self.turn_speed > 0 else 'RIGHT'
             print(f"[BackUpAndRotate] No ball history — alternating: {label}")
         elif last_cx >= self.IMAGE_CENTER:
@@ -202,22 +202,22 @@ class SearchBall(py_trees.behaviour.Behaviour):
  
         if last_cx < 0:
             # Palla mai vista: alterna la direzione ad ogni attivazione
-            self._default_direction *= -1
-            self._spin_direction = self._default_direction
-            label = 'LEFT' if self._spin_direction > 0 else 'RIGHT'
+            self.default_direction *= -1
+            self.spin_direction = self.default_direction
+            label = 'LEFT' if self.spin_direction > 0 else 'RIGHT'
             print(f"[SearchBall] No history — alternating spin: {label}")
         elif last_cx >= self.IMAGE_CENTER:
             # Palla persa a destra del centro -> gira a destra (angular_z negativo)
-            self._spin_direction = -1.0
+            self.spin_direction = -1.0
             print(f"[SearchBall] Ball was RIGHT (cx={last_cx}) — spinning RIGHT")
         else:
             # Palla persa a sinistra del centro -> gira a sinistra (angular_z positivo)
-            self._spin_direction = 1.0
+            self.spin_direction = 1.0
             print(f"[SearchBall] Ball was LEFT (cx={last_cx}) — spinning LEFT")
 
     def update(self):
         # Ruota in cerca della palla
-        angular_z = self._spin_direction * self.SEARCH_SPEED
+        angular_z = self.spin_direction * self.SEARCH_SPEED
         self.blackboard.set('cmd_vel', {'linear': 0.0, 'angular': angular_z})
         return py_trees.common.Status.RUNNING
  
