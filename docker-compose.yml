@@ -11,7 +11,7 @@ services:
     image: ros2_custom
     container_name: ros2
     cpus: '2.0'
-    mem_limit: 1g
+    mem_limit: 768m
     volumes:
       - ./src:/workspace/src:rw
       - ./build:/workspace/build:rw
@@ -65,7 +65,7 @@ services:
     image: py310_img
     container_name: py310
     cpus: '2.0'
-    mem_limit: 1g
+    mem_limit: 768m
     volumes:
       - ./python_src:/src:rw
       - ./config/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro 
@@ -91,8 +91,8 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: mosquitto
-    cpus: '2.0'
-    mem_limit: 1g
+    cpus: '0.5'
+    mem_limit: 128m
     volumes:
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
     # Espone la porta sulla rete Host
