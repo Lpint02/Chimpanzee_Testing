@@ -25,6 +25,17 @@ state = {
 }
 state_lock = threading.Lock()
 
+# Diagnostic tracking: per-topic message counts, last raw payload, last timestamp.
+# This is the primary tool for diagnosing "is this topic arriving at all?"
+diag = {
+    "robot/camera/debug":    {"count": 0, "last_raw": None, "last_ts": None, "last_error": None},
+    "robot/vision/ball":     {"count": 0, "last_raw": None, "last_ts": None, "last_error": None},
+    "robot/cmd_vel":         {"count": 0, "last_raw": None, "last_ts": None, "last_error": None},
+    "robot/battery/status":  {"count": 0, "last_raw": None, "last_ts": None, "last_error": None},
+    "robot/bumper":          {"count": 0, "last_raw": None, "last_ts": None, "last_error": None},
+}
+diag_lock = threading.Lock()
+
 MQTT_HOST = os.environ.get("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.environ.get("MQTT_PORT", 1883))
 
@@ -332,6 +343,14 @@ HTML = """
       <div id="log"></div>
     </div>
 
+    <!-- MQTT DIAGNOSTICS -->
+    <div class="data-card">
+      <div class="panel-header">MQTT DIAGNOSTICS</div>
+      <div class="data-rows" id="diag-rows">
+        <div class="data-row" style="font-size:0.68rem;color:var(--dim)">Loading...</div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -448,6 +467,39 @@ HTML = """
 
   poll();
   addLog('Viewer started', 'var(--accent)');
+
+  // ── Diagnostics panel ──────────────────────────────────────────────
+  // Polls /debug every 2s and shows per-topic message counts + last payload.
+  // A count of 0 means the ROS2 bridge is not publishing that topic at all.
+  const TOPIC_LABELS = {
+    'robot/camera/debug':   'CAMERA',
+    'robot/vision/ball':    'VISION',
+    'robot/cmd_vel':        'CMD_VEL',
+    'robot/battery/status': 'BATTERY',
+    'robot/bumper':         'BUMPER',
+  };
+
+  function pollDebug() {
+    fetch('/debug')
+      .then(r => r.json())
+      .then(diag => {
+        const rows = document.getElementById('diag-rows');
+        rows.innerHTML = Object.entries(diag).map(([topic, info]) => {
+          const label = TOPIC_LABELS[topic] || topic;
+          const ok    = info.count > 0;
+          const ago   = info.seconds_ago !== null ? `${info.seconds_ago}s ago` : 'never';
+          const err   = info.last_error  ? ` ⚠ ${info.last_error}` : '';
+          const color = !ok ? 'var(--accent2)' : info.last_error ? 'var(--warn)' : 'var(--accent3)';
+          return `<div class="data-row" style="font-size:0.68rem;flex-wrap:wrap;gap:2px">
+            <span class="data-label">${label}</span>
+            <span style="color:${color};font-weight:bold">${info.count} msg · ${ago}${err}</span>
+          </div>`;
+        }).join('');
+        setTimeout(pollDebug, 2000);
+      })
+      .catch(() => setTimeout(pollDebug, 3000));
+  }
+  pollDebug();
 </script>
 </body>
 </html>
@@ -465,8 +517,30 @@ def on_connect(client, userdata, flags, rc):
 
 def on_message(client, userdata, msg):
     topic = msg.topic
+    now = time.time()
+
+    # ── Diagnostics: record every message regardless of parse outcome ──
+    raw_snippet = msg.payload[:120].decode(errors='replace')
+    with diag_lock:
+        if topic in diag:
+            diag[topic]["count"] += 1
+            diag[topic]["last_ts"] = now
+            # For camera frames just store the size, not the raw bytes
+            if topic == "robot/camera/debug":
+                diag[topic]["last_raw"] = f"<binary frame {len(msg.payload)} bytes>"
+            else:
+                diag[topic]["last_raw"] = raw_snippet
+        else:
+            # Unexpected topic — record it so the user can spot mismatches
+            diag[topic] = {"count": 1, "last_raw": raw_snippet,
+                           "last_ts": now, "last_error": None}
+    # Print every non-camera message so the terminal shows what's arriving
+    if topic != "robot/camera/debug":
+        print(f"[MQTT] {topic}  →  {raw_snippet}")
+
+    # ── State update ──
     with state_lock:
-        state["last_update"] = time.time()
+        state["last_update"] = now
         try:
             if topic == "robot/camera/debug":
                 state["frame_b64"] = msg.payload.decode()
@@ -478,11 +552,6 @@ def on_message(client, userdata, msg):
                 state["cmd_vel"] = json.loads(msg.payload)
 
             elif topic == "robot/battery/status":
-                # BUG FIX 1: the ROS2 bridge publishes the raw BatteryState
-                # message which uses 'percentage' (0.0-1.0), not 'level'.
-                # Convert to 0-100 so the JS battery bar and label work.
-                # Fallback to 'level' for test harnesses that already send
-                # a normalized 0-100 value.
                 raw = json.loads(msg.payload)
                 percentage = raw.get('percentage', raw.get('level', 0.0))
                 state["battery"] = {
@@ -493,10 +562,12 @@ def on_message(client, userdata, msg):
             elif topic == "robot/bumper":
                 state["bumper"] = json.loads(msg.payload)
 
-        # BUG FIX 2: catch parse/type errors per-message so a single bad
-        # payload on any topic does not silently stop all subsequent updates.
         except Exception as e:
-            print(f"[web_viewer] on_message error on '{topic}': {e}")
+            err = str(e)
+            print(f"[web_viewer] PARSE ERROR on '{topic}': {err}  payload={raw_snippet}")
+            with diag_lock:
+                if topic in diag:
+                    diag[topic]["last_error"] = err
 def mqtt_thread():
     client = mqtt.Client(client_id="web_viewer")
     client.on_connect = on_connect
@@ -525,6 +596,27 @@ def get_state():
             "battery": state["battery"],
             "bumper": state["bumper"],
         }
+
+@app.route('/debug')
+def get_debug():
+    """
+    Diagnostic endpoint. Open http://<jetson-ip>:5000/debug in your browser
+    to see exactly which MQTT topics are arriving, how many messages have been
+    received, the raw payload of the last message, and any parse errors.
+    If count == 0 for battery or bumper, the ROS2 bridge is not publishing
+    those topics (wrong topic name, bridge not configured, etc.).
+    """
+    now = time.time()
+    with diag_lock:
+        result = {}
+        for topic, info in diag.items():
+            result[topic] = {
+                "count":      info["count"],
+                "last_raw":   info["last_raw"],
+                "seconds_ago": round(now - info["last_ts"], 1) if info["last_ts"] else None,
+                "last_error": info["last_error"],
+            }
+    return result
 
 if __name__ == '__main__':
     t = threading.Thread(target=mqtt_thread, daemon=True)
