@@ -61,3 +61,7 @@ Il **detector_kalman.py** è stato modificato per cercare di farlo funzionare. H
 2. Tramite la web dashboard vedere se entra on "Ghost Mode" ovvero va ad usare il filtro di Kalman, come faceva in simulazione
 3. Vedere se si vede la batteria sulla web dashboard
 4. Testare il bumper: se il robot sbatte dovrebbe innescarsi la manovra evasiva che consiste nell'indietreggiare e girarsi verso il lato dove è la palla
+
+# Cose da fare: fase 2
+
+Avere una web dashboard che faccia vedere effettivamente lo stato del robot (non si vedono la batteria e lo stato del bumper).
