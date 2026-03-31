@@ -428,13 +428,19 @@ HTML = """
     }
 
     // Bumper
+    // BUG FIX 3: use 'in' operator instead of '!== undefined' so that
+    // the widget renders "CLEAR" as soon as the first message arrives,
+    // even when is_bumped is false (a falsy value that still means data
+    // is flowing). Previously, is_bumped===false would satisfy the guard
+    // but the initial state {} left the panel at "—" forever if no bump
+    // had occurred since startup.
     const bump = data.bumper || {};
-    if (bump.is_bumped !== undefined) {
+    if ('is_bumped' in bump) {
       const el = document.getElementById('bump-status');
-      el.textContent = bump.is_bumped ? '⚠ BUMPED' : 'CLEAR';
+      el.textContent = bump.is_bumped ? 'BUMPED' : 'CLEAR';
       el.className = 'data-value' + (bump.is_bumped ? ' danger' : ' real');
       if (bump.is_bumped !== lastBumped) {
-        if (bump.is_bumped) addLog('⚠ BUMPER HIT!', 'var(--accent2)');
+        if (bump.is_bumped) addLog('BUMPER HIT!', 'var(--accent2)');
         lastBumped = bump.is_bumped;
       }
     }
@@ -461,21 +467,36 @@ def on_message(client, userdata, msg):
     topic = msg.topic
     with state_lock:
         state["last_update"] = time.time()
-        if topic == "robot/camera/debug":
-            state["frame_b64"] = msg.payload.decode()
-        elif topic == "robot/vision/ball":
-            state["vision"] = json.loads(msg.payload)
-        elif topic == "robot/cmd_vel":
-            state["cmd_vel"] = json.loads(msg.payload)
-        elif topic == "robot/battery/status":
-            raw = json.loads(msg.payload)
-            # Normalize: ROS2 bridge publishes 'percentage' (0.0-1.0),
-            # but the dashboard expects 'level' (0-100).
-            percentage = raw.get('percentage', raw.get('level', 0))
-            state["battery"] = {"level": round(percentage * 100, 1), "voltage": raw.get('voltage', 0)}
-        elif topic == "robot/bumper":
-            state["bumper"] = json.loads(msg.payload)
+        try:
+            if topic == "robot/camera/debug":
+                state["frame_b64"] = msg.payload.decode()
 
+            elif topic == "robot/vision/ball":
+                state["vision"] = json.loads(msg.payload)
+
+            elif topic == "robot/cmd_vel":
+                state["cmd_vel"] = json.loads(msg.payload)
+
+            elif topic == "robot/battery/status":
+                # BUG FIX 1: the ROS2 bridge publishes the raw BatteryState
+                # message which uses 'percentage' (0.0-1.0), not 'level'.
+                # Convert to 0-100 so the JS battery bar and label work.
+                # Fallback to 'level' for test harnesses that already send
+                # a normalized 0-100 value.
+                raw = json.loads(msg.payload)
+                percentage = raw.get('percentage', raw.get('level', 0.0))
+                state["battery"] = {
+                    "level":   round(float(percentage) * 100, 1),
+                    "voltage": raw.get('voltage', 0.0),
+                }
+
+            elif topic == "robot/bumper":
+                state["bumper"] = json.loads(msg.payload)
+
+        # BUG FIX 2: catch parse/type errors per-message so a single bad
+        # payload on any topic does not silently stop all subsequent updates.
+        except Exception as e:
+            print(f"[web_viewer] on_message error on '{topic}': {e}")
 def mqtt_thread():
     client = mqtt.Client(client_id="web_viewer")
     client.on_connect = on_connect

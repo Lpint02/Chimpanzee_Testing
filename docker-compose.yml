@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   # =================================================================
@@ -10,8 +10,8 @@ services:
       dockerfile: Dockerfile.ros2
     image: ros2_custom
     container_name: ros2
-    cpus: '2.0'
-    mem_limit: 768m
+    cpus: "2.0"
+    mem_limit: 1g
     volumes:
       - ./src:/workspace/src:rw
       - ./build:/workspace/build:rw
@@ -33,7 +33,7 @@ services:
       - LD_LIBRARY_PATH=/usr/local/cuda/lib64
     runtime: nvidia
     command: bash /workspace/start_body.sh
-    
+
     # NETWORKING:
     # Il container ROS2 DEVE usare 'host' network per parlare col driver del robot.
     # Questo significa che condivide l'IP e le porte della Jetson Nano reale.
@@ -58,17 +58,17 @@ services:
   # =================================================================
   # 2. BRAIN: Python Container (Logic & AI)
   # =================================================================
-  python310: 
-    build: 
+  python310:
+    build:
       context: .
       dockerfile: Dockerfile
     image: py310_img
     container_name: py310
-    cpus: '2.0'
-    mem_limit: 768m
+    cpus: "2.0"
+    mem_limit: 1g
     volumes:
       - ./python_src:/src:rw
-      - ./config/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro 
+      - ./config/mosquitto.conf:/etc/mosquitto/mosquitto.conf:ro
     working_dir: /src
     environment:
       # Dal container Bridge, non possiamo usare 'localhost' perché 'host' network non è bridge network.
@@ -78,9 +78,9 @@ services:
       # CONTRO: Meno isolamento (ma al prof frega poco dell'isolamento di rete vero, vuole solo 2 container).
       # DECISIONE: Usiamo HOST NETWORK per entrambi per semplicità massima sulla Jetson.
       - MQTT_HOST=localhost
-    
+
     network_mode: host
-    user: "1000:1000"    
+    user: "1000:1000"
     command: bash start_brain.sh
     depends_on:
       - mosquitto
@@ -91,14 +91,14 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: mosquitto
-    cpus: '0.5'
-    mem_limit: 128m
+    cpus: "2.0"
+    mem_limit: 1g
     volumes:
       - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf
     # Espone la porta sulla rete Host
     #ports:
-     # - 1883:1883
-     # - 9001:9001
+    # - 1883:1883
+    # - 9001:9001
     network_mode: host
 
 # Networks section removed because everyone is using 'network_mode: host'
