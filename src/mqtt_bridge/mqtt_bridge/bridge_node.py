@@ -12,6 +12,7 @@ from sensor_msgs.msg import Image, BatteryState
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
 from irobot_create_msgs.action import Undock, Dock
+from irobot_create_msgs.msg import HazardDetectionVector
 import cv2
 import paho.mqtt.client as mqtt
 import json
@@ -50,6 +51,17 @@ class MqttBridge(Node):
             BatteryState,
             '/battery_state',
             self.battery_callback,
+            10)
+
+        # ROS -> MQTT (Bumper via HazardDetectionVector)
+        # The Create 3 publishes all hazard events (bump, cliff, wheel-drop...)
+        # on /hazard_detection. We filter for type BUMP (1) and publish a
+        # simple {"is_bumped": bool} to robot/bumper, only on state change.
+        self._last_bumped = None  # None = never published
+        self.hazard_subscription = self.create_subscription(
+            HazardDetectionVector,
+            '/hazard_detection',
+            self.hazard_callback,
             10)
 
         # MQTT Client Setup
@@ -174,6 +186,31 @@ class MqttBridge(Node):
             self.client.publish("robot/battery/status", payload)
         except Exception as e:
             self.get_logger().error(f"Error publishing battery status: {e}")
+
+    # HazardDetection.type constants (irobot_create_msgs)
+    HAZARD_BUMP = 1
+
+    def hazard_callback(self, msg):
+        """
+        Filtra HazardDetectionVector per eventi BUMP e pubblica
+        {"is_bumped": bool} su robot/bumper solo quando lo stato cambia.
+        Pubblicare solo sui cambi di stato evita di inondare il broker
+        alla frequenza del topic ROS2 (tipicamente 62 Hz sul Create 3).
+        """
+        try:
+            is_bumped = any(
+                d.type == self.HAZARD_BUMP for d in msg.detections
+            )
+            # Pubblica solo se lo stato è cambiato (o al primo messaggio)
+            if is_bumped != self._last_bumped:
+                payload = json.dumps({"is_bumped": is_bumped})
+                self.client.publish("robot/bumper", payload)
+                self._last_bumped = is_bumped
+                self.get_logger().info(
+                    f"Bumper → {'BUMPED' if is_bumped else 'CLEAR'}"
+                )
+        except Exception as e:
+            self.get_logger().error(f"Error in hazard_callback: {e}")
 
     def image_callback(self, msg):
         """Convert ROS Image -> JPEG -> Base64 -> MQTT"""

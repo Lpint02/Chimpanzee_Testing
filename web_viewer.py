@@ -552,10 +552,12 @@ def on_message(client, userdata, msg):
                 state["cmd_vel"] = json.loads(msg.payload)
 
             elif topic == "robot/battery/status":
+                # bridge_node.py already converts msg.percentage (0.0-1.0)
+                # to 0-100 and publishes it under the key "level".
+                # Use it directly — do NOT multiply by 100 again.
                 raw = json.loads(msg.payload)
-                percentage = raw.get('percentage', raw.get('level', 0.0))
                 state["battery"] = {
-                    "level":   round(float(percentage) * 100, 1),
+                    "level":   round(float(raw.get('level', 0.0)), 1),
                     "voltage": raw.get('voltage', 0.0),
                 }
 
