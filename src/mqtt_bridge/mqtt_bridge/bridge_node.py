@@ -8,6 +8,7 @@ e viceversa per camera, cmd_vel, battery, dock e undock.
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionClient
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import Image, BatteryState
 from geometry_msgs.msg import Twist
 from cv_bridge import CvBridge
@@ -51,7 +52,7 @@ class MqttBridge(Node):
             BatteryState,
             '/battery_state',
             self.battery_callback,
-            10)
+            qos_profile_sensor_data)
 
         # ROS -> MQTT (Bumper via HazardDetectionVector)
         # The Create 3 publishes all hazard events (bump, cliff, wheel-drop...)
@@ -62,7 +63,7 @@ class MqttBridge(Node):
             HazardDetectionVector,
             '/hazard_detection',
             self.hazard_callback,
-            10)
+            qos_profile_sensor_data)
 
         # MQTT Client Setup
         self.client = mqtt.Client(client_id="ros2_bridge")

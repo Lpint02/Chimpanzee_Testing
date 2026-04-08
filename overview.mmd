@@ -1,0 +1,32 @@
+%%{init: {'theme': 'dark', 'themeVariables': { 'darkMode': true, 'background': '#1a1a1a', 'primaryColor': '#1e1e1e', 'primaryBorderColor': '#ffffff', 'primaryTextColor': '#ffffff', 'lineColor': '#888888', 'clusterBkg': '#1e1e1e', 'clusterBorder': '#ffffff' }} }%%
+flowchart LR
+    %% Stile generale
+    classDef default fill:#1e1e1e,stroke:#fff,stroke-width:1px,color:#fff;
+    classDef transparent fill:none,stroke:none,color:#fff;
+
+    subgraph BODY ["🦴 BODY (ROS2)"]
+        direction TB
+        C1["• camera_node.py<br>(cattura frames CSI)"]
+        C2["• bridge_node.py (ROS2)<br>(ROS2 ↔ MQTT)"]
+        C3["• Hardware fisico:<br>motori, camera, bumper<br>batteria, dock station"]
+        
+        C1 ~~~ C2 ~~~ C3
+    end
+
+    subgraph MQTT ["MQTT (Mosquitto)"]
+        direction TB
+        T1["robot/camera<br>robot/cmd_vel<br>robot/battery/status<br>robot/bumper<br>robot/cmd/undock<br>robot/cmd/dock<br>robot/undock/result<br>robot/dock/result<br>robot/vision/ball"]:::transparent
+    end
+
+    subgraph BRAIN ["🧠 BRAIN (Python)"]
+        direction TB
+        B1["• detector_kalman.py<br>(visione + Kalman)"]
+        B2["• main.py<br>(behavior tree)"]
+        B3["• behaviors/<br>(azioni + condizioni)"]
+        
+        B1 ~~~ B2 ~~~ B3
+    end
+
+    %% Connessioni bidirezionali
+    BODY <==> MQTT
+    MQTT <==> BRAIN
