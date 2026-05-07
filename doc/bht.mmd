@@ -1,0 +1,53 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryTextColor': '#fff', 'background': '#1e1e1e', 'primaryColor': '#2d2d2d', 'lineColor': '#888' }}}%%
+graph TD
+    %% ----- DEFINIZIONE STILI TEMA SCURO -----
+    classDef seq fill:#01579B,stroke:#29B6F6,stroke-width:2px,color:#FFFFFF,rx:8px,ry:8px;
+    classDef sel fill:#E65100,stroke:#FFA726,stroke-width:2px,color:#FFFFFF,rx:8px,ry:8px;
+    classDef act fill:#1B5E20,stroke:#66BB6A,stroke-width:2px,color:#FFFFFF;
+    classDef cond fill:#B71C1C,stroke:#EF5350,stroke-width:2px,color:#FFFFFF;
+
+    %% ----- LIVELLO 1: ROOT -----
+    Root(["⏩ Root<br>(Sequence, memory=False)"]):::seq
+    
+    ToBB["⚙️ [1] ToBlackboard<br>(sync MQTT→BB)"]:::act
+    CheckUndock["🔌 [2] CheckAndUndock<br>(SUCCESS se sganciato)"]:::act
+    BrainSel(["❓ [3] Brain_Selector<br>(Selector, memory=False)"]):::sel
+
+    Root --> ToBB
+    Root --> CheckUndock
+    Root --> BrainSel
+
+    %% ----- LIVELLO 2: RAMI DEL SELECTOR -----
+    BatSeq(["⏩ [3.1] Battery_Seq"]):::seq
+    RecSeq(["⏩ [3.2] Recovery_Seq"]):::seq
+    RealSeq(["⏩ [3.3] RealTracking_Seq"]):::seq
+    GhostSeq(["⏩ [3.4] GhostTrack_Seq"]):::seq
+    SearchBall["🔍 [3.5] SearchBall<br>(Action fallback)"]:::act
+
+    BrainSel --> BatSeq
+    BrainSel --> RecSeq
+    BrainSel --> RealSeq
+    BrainSel --> GhostSeq
+    BrainSel --> SearchBall
+
+    %% ----- LIVELLO 3: CONDIZIONI E AZIONI -----
+    %% Uso forma a pillola ([ ]) invece dei rombi per compattare in orizzontale
+    BatCond(["🔋 IsBatteryLow<br>(< 20%)"]):::cond
+    BatAct["🏠 ReturnToBase"]:::act
+    BatSeq --> BatCond
+    BatSeq --> BatAct
+
+    RecCond(["💥 BumperHit<br>or Recovering"]):::cond
+    RecAct["↩️ BackUp<br>& Rotate"]:::act
+    RecSeq --> RecCond
+    RecSeq --> RecAct
+
+    RealCond(["🔴 BallDetected<br>(real, >500)"]):::cond
+    RealAct["▶️ FollowBall<br>(PID)"]:::act
+    RealSeq --> RealCond
+    RealSeq --> RealAct
+
+    GhostCond(["👻 IsTargetGhost<br>(mode=='ghost')"]):::cond
+    GhostAct["🔮 TrackGhost<br>(PID+fwd)"]:::act
+    GhostSeq --> GhostCond
+    GhostSeq --> GhostAct

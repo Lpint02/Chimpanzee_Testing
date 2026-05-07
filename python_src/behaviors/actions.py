@@ -63,7 +63,7 @@ class BackUpAndRotate(py_trees.behaviour.Behaviour):
         self.random_turn_speed = 0.0
         self.default_direction = 1.0
 
-    def initialise(self):
+    def initialise(self): #attivato quando il nodo passa da Inactive a Running
         self.start_time = time.time()
         self.blackboard.set('is_recovering', True)
         self.blackboard.set('is_bumped', False)  # FIX reset is_bumped per evitare loop infinito
